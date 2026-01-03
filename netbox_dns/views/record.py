@@ -1,26 +1,25 @@
-from dns import name as dns_name
-
 from django.utils.translation import gettext_lazy as _
-
+from dns import name as dns_name
 from netbox.views import generic
 from utilities.views import register_model_view
 
+from netbox_dns.choices import RecordTypeChoices
 from netbox_dns.filtersets import RecordFilterSet
 from netbox_dns.forms import (
-    RecordImportForm,
+    BaseRecordForm,
+    RecordBulkEditForm,
     RecordFilterForm,
     RecordForm,
-    RecordBulkEditForm,
+    RecordFormMX,
+    RecordImportForm,
 )
 from netbox_dns.models import Record, Zone
-from netbox_dns.choices import RecordTypeChoices
-from netbox_dns.tables import RecordTable, ManagedRecordTable, RelatedRecordTable
+from netbox_dns.tables import ManagedRecordTable, RecordTable, RelatedRecordTable
 from netbox_dns.utilities import (
-    value_to_unicode,
     get_parent_zone_names,
     regex_from_list,
+    value_to_unicode,
 )
-
 
 __all__ = (
     "RecordView",
@@ -196,7 +195,16 @@ class RecordEditView(generic.ObjectEditView):
     queryset = Record.objects.filter(managed=False).prefetch_related(
         "zone", "ptr_record"
     )
-    form = RecordForm
+
+    @staticmethod
+    def form(instance: Record | None, initial: dict, *args, **kwargs):
+        t = initial.get("type", instance.type if instance else None)
+        if t == "A":
+            return RecordForm(instance=instance, initial=initial, *args, **kwargs)
+        if t == "MX":
+            return RecordFormMX(instance=instance, initial=initial, *args, **kwargs)
+
+        return BaseRecordForm(instance=instance, initial=initial, *args, **kwargs)
 
 
 @register_model_view(Record, "delete")

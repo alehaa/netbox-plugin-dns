@@ -1,40 +1,43 @@
 from django import forms
 from django.utils.translation import gettext_lazy as _
-
 from netbox.forms import (
     NetBoxModelBulkEditForm,
     NetBoxModelFilterSetForm,
-    NetBoxModelImportForm,
     NetBoxModelForm,
+    NetBoxModelImportForm,
+)
+from tenancy.forms import TenancyFilterForm, TenancyForm
+from tenancy.models import Tenant, TenantGroup
+from utilities.forms import (
+    BOOLEAN_WITH_BLANK_CHOICES,
+    add_blank_choice,
 )
 from utilities.forms.fields import (
-    DynamicModelMultipleChoiceField,
-    TagFilterField,
     CSVChoiceField,
     CSVModelChoiceField,
     DynamicModelChoiceField,
+    DynamicModelMultipleChoiceField,
+    TagFilterField,
 )
-from utilities.forms.widgets import BulkEditNullBooleanSelect
-from utilities.forms import BOOLEAN_WITH_BLANK_CHOICES, add_blank_choice
-from utilities.forms.rendering import FieldSet
-from tenancy.models import Tenant, TenantGroup
-from tenancy.forms import TenancyForm, TenancyFilterForm
+from utilities.forms.rendering import FieldSet, TabbedGroups
+from utilities.forms.widgets import BulkEditNullBooleanSelect, HTMXSelect
 
-from netbox_dns.models import View, Zone, Record
 from netbox_dns.choices import RecordSelectableTypeChoices, RecordStatusChoices
-from netbox_dns.utilities import name_to_unicode
 from netbox_dns.fields import TimePeriodField
-
+from netbox_dns.models import Record, View, Zone
+from netbox_dns.utilities import name_to_unicode
 
 __all__ = (
     "RecordForm",
+    "RecordFormMX",
     "RecordFilterForm",
     "RecordImportForm",
     "RecordBulkEditForm",
+    "BaseRecordForm",
 )
 
 
-class RecordForm(TenancyForm, NetBoxModelForm):
+class BaseRecordForm(TenancyForm, NetBoxModelForm):
     class Meta:
         model = Record
 
@@ -57,29 +60,53 @@ class RecordForm(TenancyForm, NetBoxModelForm):
             "ttl": _("TTL"),
         }
 
-    fieldsets = (
-        FieldSet(
-            "name",
-            "view",
-            "zone",
-            "type",
-            "value",
-            "status",
-            "ttl",
-            "disable_ptr",
-            "description",
-            name=_("Record"),
-        ),
-        FieldSet(
-            "tenant_group",
-            "tenant",
-            name=_("Tenancy"),
-        ),
-        FieldSet(
-            "tags",
-            name=_("Tags"),
-        ),
-    )
+    @property
+    def fieldsets(self) -> tuple[FieldSet, ...]:
+        assisted_fields = [
+            x for x in self.Meta.fields if x not in BaseRecordForm.Meta.fields
+        ]
+
+        return (
+            FieldSet(
+                "name",
+                "view",
+                "zone",
+                name=_("Record"),
+            ),
+            FieldSet(
+                "type",
+                TabbedGroups(
+                    *(
+                        (
+                            FieldSet(
+                                *assisted_fields,
+                                name=_("assisted"),
+                            ),
+                        )
+                        if assisted_fields
+                        else ()
+                    ),
+                    FieldSet("value", name=_("raw")),
+                ),
+                name=_("Value"),
+            ),
+            FieldSet(
+                "status",
+                "ttl",
+                "disable_ptr",
+                "description",
+                name=_("Attributes"),
+            ),
+            FieldSet(
+                "tenant_group",
+                "tenant",
+                name=_("Tenancy"),
+            ),
+            FieldSet(
+                "tags",
+                name=_("Tags"),
+            ),
+        )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -108,7 +135,24 @@ class RecordForm(TenancyForm, NetBoxModelForm):
         choices=add_blank_choice(RecordSelectableTypeChoices),
         required=True,
         label=_("Type"),
+        widget=HTMXSelect(),
     )
+
+
+class RecordForm(BaseRecordForm):
+    pass
+
+
+class RecordFormMX(BaseRecordForm):
+    mx_priority = forms.IntegerField(min_value=0)
+    mx_target = forms.CharField(max_length=255)
+
+    class Meta(BaseRecordForm.Meta):
+        fields = (
+            *(BaseRecordForm.Meta.fields),
+            "mx_priority",
+            "mx_target",
+        )
 
 
 class RecordFilterForm(TenancyFilterForm, NetBoxModelFilterSetForm):
